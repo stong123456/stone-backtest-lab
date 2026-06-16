@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+outputs/
+runtime-logs/
+logs/
+cache/
+*.log
+.env
+.env.*

@@ -1,0 +1,10 @@
+# OKX blue-chip symbols, one per line.
+# Works with: --preset balanced --symbols-file examples/symbols_okx_bluechip.txt
+BTC
+ETH
+SOL
+BNB
+LINK
+AAVE
+LTC
+XRP

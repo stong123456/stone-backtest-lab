@@ -1,0 +1,3 @@
+display_name: 石头量化回测实验室
+short_description: 用公开行情数据回测任意加密货币标的，并输出中文报告、交易明细和因子归因。
+default_prompt: 使用石头量化回测实验室回测 BTC、ETH 和 SUI 最近 180 天表现，并总结哪些因子改善或拖累了结果。

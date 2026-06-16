@@ -1,0 +1,4 @@
+# GeckoTerminal on-chain examples.
+# Format: network:token:0xTOKEN or network:pool:0xPOOL
+# Base WETH token. The tool resolves it to the highest-liquidity pool.
+base:token:0x4200000000000000000000000000000000000006
