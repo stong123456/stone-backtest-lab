@@ -74,9 +74,12 @@ def load_trades(path: Path) -> list[dict[str, Any]]:
 
 
 def load_candles(cache_dir: Path, inst_id: str) -> list[dict[str, float]]:
-    name = inst_id.replace("-", "_") + "_1H_180d.json"
-    path = cache_dir / name
-    if not path.exists():
+    prefix = inst_id.replace("-", "_") + "_1H_"
+    preferred = cache_dir / f"{prefix}180d.json"
+    candidates = [preferred] if preferred.exists() else []
+    candidates.extend(sorted(cache_dir.glob(f"{prefix}*.json"), key=lambda item: item.stat().st_mtime, reverse=True))
+    path = next((item for item in candidates if item.exists()), None)
+    if path is None:
         return []
     payload = load_json(path)
     if isinstance(payload, dict):
@@ -381,7 +384,7 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Hermes Backtest Lab 页面报告</title>
+  <title>石头量化回测实验室 v2.1 页面报告</title>
   <style>
     :root {{
       --bg: #04100d;
@@ -475,7 +478,7 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
 <body>
   <main class="wrap">
     <section class="hero">
-      <div class="stamp">Hermes Backtest Lab Visual Report</div>
+      <div class="stamp">石头量化回测实验室 v2.1 / Hermes Backtest Lab v2.1</div>
       <h1>自动交易回测页面报告</h1>
       <div class="subtitle">
         数据来源：{html.escape(str(run_dir.name))}。本页为离线自包含报告，可直接用浏览器打开。

@@ -3,13 +3,13 @@ name: hermes-backtest-lab
 description: Build and run an open-source local crypto backtest lab for OKX public market data and GeckoTerminal on-chain DEX candles. Use when the user wants to backtest arbitrary OKX spot/perpetual symbols, replay chain token or pool prices, analyze 90/180 day performance, compare factors, or generate a shareable non-secret report without using GetAgent or private exchange credentials.
 ---
 
-# 石头量化回测实验室 v2.0
+# 石头量化回测实验室 v2.1
 
-English name: Hermes Backtest Lab v2.0.
+English name: Hermes Backtest Lab v2.1.
 
 Use this skill to run a local, shareable crypto backtest that does not require API keys.
 
-Current script version: `hermes-backtest-lab-0.1.10`.
+Current script version: `hermes-backtest-lab-v2.1.0`.
 
 ## Safety
 

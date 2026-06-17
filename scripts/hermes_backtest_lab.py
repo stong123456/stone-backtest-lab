@@ -8,7 +8,7 @@ import statistics
 import sys
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, time as dt_time, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -17,9 +17,9 @@ import requests
 
 OKX_PUBLIC = "https://www.okx.com"
 GECKOTERMINAL_PUBLIC = "https://api.geckoterminal.com/api/v2"
-VERSION = "hermes-backtest-lab-v2.0.0"
-TOOL_NAME_CN = "石头量化回测实验室 v2.0"
-TOOL_NAME_EN = "Hermes Backtest Lab v2.0"
+VERSION = "hermes-backtest-lab-v2.1.0"
+TOOL_NAME_CN = "石头量化回测实验室 v2.1"
+TOOL_NAME_EN = "Hermes Backtest Lab v2.1"
 
 DEFAULT_SWAP_SYMBOLS = "BTC,ETH,SOL,XRP,DOGE,SUI,BNB,TON,TRX,LINK,AVAX,NEAR,AAVE,UNI,LTC,APT,ARB,OP,DOT,ICP"
 MEME_SWAP_SYMBOLS = "PEPE,DOGE,TRUMP,MERL,SUI,TON,ARB,OP,NEAR"
@@ -237,6 +237,48 @@ def pct(value: float) -> str:
 
 def utc_text(ts: int) -> str:
     return datetime.fromtimestamp(ts / 1000, tz=timezone.utc).strftime("%Y-%m-%d %H:%M")
+
+
+def parse_date_ms(value: str, *, end_of_day: bool = False) -> int | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    normalized = raw.replace("Z", "+00:00")
+    try:
+        if len(normalized) == 10 and normalized[4] == "-" and normalized[7] == "-":
+            day = datetime.strptime(normalized, "%Y-%m-%d").date()
+            dt = datetime.combine(day, dt_time.max if end_of_day else dt_time.min, tzinfo=timezone.utc)
+        else:
+            dt = datetime.fromisoformat(normalized)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+    except ValueError as exc:
+        raise ValueError(f"bad date '{value}'. Use YYYY-MM-DD or ISO time like 2026-01-31T08:00:00Z.") from exc
+    return int(dt.timestamp() * 1000)
+
+
+def resolve_time_window(args: argparse.Namespace) -> tuple[int, int, str]:
+    now_ms = int(time.time() * 1000)
+    start_ms = parse_date_ms(getattr(args, "start_date", ""), end_of_day=False)
+    end_ms = parse_date_ms(getattr(args, "end_date", ""), end_of_day=True)
+    if start_ms is None and end_ms is None:
+        end_ms = now_ms
+        start_ms = end_ms - int(args.days * 86_400_000)
+        label = f"{args.days}d"
+    elif start_ms is None:
+        assert end_ms is not None
+        start_ms = end_ms - int(args.days * 86_400_000)
+        label = f"{utc_text(start_ms)}_to_{utc_text(end_ms)}"
+    elif end_ms is None:
+        end_ms = min(now_ms, start_ms + int(args.days * 86_400_000))
+        label = f"{utc_text(start_ms)}_to_{utc_text(end_ms)}"
+    else:
+        label = f"{utc_text(start_ms)}_to_{utc_text(end_ms)}"
+    if end_ms <= start_ms:
+        raise ValueError("--end-date must be later than --start-date")
+    return start_ms, end_ms, safe_cache_key(label)
 
 
 def okx_get(path: str, params: dict[str, Any], retries: int = 3) -> dict[str, Any]:
@@ -580,16 +622,28 @@ def parse_okx_candle(row: list[Any]) -> Bar:
     )
 
 
-def fetch_candles(inst_id: str, bar: str, days: int, cache_dir: Path, refresh: bool = False) -> list[Bar]:
+def fetch_candles(
+    inst_id: str,
+    bar: str,
+    days: int,
+    cache_dir: Path,
+    refresh: bool = False,
+    *,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+    window_label: str | None = None,
+) -> list[Bar]:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / f"{inst_id.replace('-', '_')}_{bar}_{days}d.json"
+    now_ms = int(time.time() * 1000)
+    resolved_end = int(end_ms or now_ms)
+    resolved_start = int(start_ms if start_ms is not None else resolved_end - int(days * 86_400_000))
+    label = safe_cache_key(window_label or f"{days}d")
+    cache_path = cache_dir / f"{inst_id.replace('-', '_')}_{bar}_{label}.json"
     if cache_path.exists() and not refresh:
         rows = json.loads(cache_path.read_text(encoding="utf-8"))
         return [Bar(**row) for row in rows]
 
-    now_ms = int(time.time() * 1000)
-    start_ms = now_ms - int(days * 86_400_000)
-    cursor: int | None = None
+    cursor: int | None = resolved_end + 1
     seen: set[int] = set()
     bars: list[Bar] = []
     limit = 100
@@ -611,15 +665,15 @@ def fetch_candles(inst_id: str, bar: str, days: int, cache_dir: Path, refresh: b
         for candle in parsed:
             if candle.ts in seen:
                 continue
-            if candle.ts >= start_ms:
+            if resolved_start <= candle.ts <= resolved_end:
                 bars.append(candle)
                 seen.add(candle.ts)
                 new_count += 1
         oldest = min((candle.ts for candle in parsed), default=None)
-        if oldest is None or oldest <= start_ms or new_count == 0:
+        if oldest is None or oldest <= resolved_start or new_count == 0:
             break
         cursor = oldest - 1
-        if len(bars) > int(days * 86_400_000 / bar_to_ms(bar)) + 500:
+        if len(bars) > int((resolved_end - resolved_start) / bar_to_ms(bar)) + 500:
             break
         time.sleep(0.12)
 
@@ -651,20 +705,25 @@ def fetch_geckoterminal_candles(
     token_side: str,
     limit: int,
     refresh: bool = False,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+    window_label: str | None = None,
 ) -> tuple[str, list[Bar]]:
     spec = parse_onchain_symbol(symbol, network_default, id_type_default)
     timeframe, aggregate = gecko_bar_parts(bar)
     pool_address, label = gecko_resolve_pool(spec["network"], spec["id_type"], spec["address"])
     inst_id = f"GT:{label}"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    cache_path = cache_dir / f"{safe_cache_key(inst_id)}_{safe_cache_key(bar)}_{days}d.json"
+    now_ms = int(time.time() * 1000)
+    resolved_end = int(end_ms or now_ms)
+    resolved_start = int(start_ms if start_ms is not None else resolved_end - int(days * 86_400_000))
+    cache_label = safe_cache_key(window_label or f"{days}d")
+    cache_path = cache_dir / f"{safe_cache_key(inst_id)}_{safe_cache_key(bar)}_{cache_label}.json"
     if cache_path.exists() and not refresh:
         rows = json.loads(cache_path.read_text(encoding="utf-8"))
         return inst_id, [Bar(**row) for row in rows]
 
-    now_sec = int(time.time())
-    start_ms = int(time.time() * 1000) - int(days * 86_400_000)
-    before_timestamp: int | None = now_sec
+    before_timestamp: int | None = int(resolved_end / 1000) + 1
     seen: set[int] = set()
     bars: list[Bar] = []
     page_limit = max(1, min(int(limit or 1000), 1000))
@@ -691,15 +750,15 @@ def fetch_geckoterminal_candles(
         for candle in parsed:
             if candle.ts in seen:
                 continue
-            if candle.ts >= start_ms:
+            if resolved_start <= candle.ts <= resolved_end:
                 bars.append(candle)
                 seen.add(candle.ts)
                 new_count += 1
         oldest = min((candle.ts for candle in parsed), default=None)
-        if oldest is None or oldest <= start_ms or new_count == 0:
+        if oldest is None or oldest <= resolved_start or new_count == 0:
             break
         before_timestamp = int(oldest / 1000) - 1
-        if len(bars) > int(days * 86_400_000 / bar_to_ms(bar)) + 500:
+        if len(bars) > int((resolved_end - resolved_start) / bar_to_ms(bar)) + 500:
             break
         time.sleep(0.35)
 
@@ -1526,6 +1585,9 @@ def write_outputs(out_dir: Path, results: list[dict[str, Any]], metrics: dict[st
         f"- Symbols: `{args.symbols}`",
         f"- Inst type: `{args.inst_type}`",
         f"- Days: `{args.days}`",
+        f"- Start date: `{args.start_date or '-'}`",
+        f"- End date: `{args.end_date or '-'}`",
+        f"- Resolved UTC window: `{getattr(args, 'resolved_start_utc', '-')}` to `{getattr(args, 'resolved_end_utc', '-')}`",
         f"- Bar: `{args.bar}`",
         "",
         "## Summary",
@@ -1716,6 +1778,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--gecko-token-side", default="base", choices=["base", "quote"], help="Whether OHLCV should use the pool base token or quote token.")
     parser.add_argument("--gecko-limit", type=int, default=1000, help="GeckoTerminal candles per request, max 1000.")
     parser.add_argument("--days", type=int, default=180)
+    parser.add_argument("--start-date", default="", help="UTC start date/time for the backtest window. Use YYYY-MM-DD or ISO time.")
+    parser.add_argument("--end-date", default="", help="UTC end date/time for the backtest window. Use YYYY-MM-DD or ISO time.")
     parser.add_argument("--bar", default="1H")
     parser.add_argument("--output-dir", default=str(Path("outputs") / "hermes_backtest_lab"))
     parser.add_argument("--starting-balance", type=float, default=10_000.0)
@@ -1811,6 +1875,11 @@ def main(argv: Iterable[str] | None = None) -> int:
     symbols_source = args.symbols if raw_has_symbols or not args.symbols_file else ""
     symbols = merge_symbols(symbols_source, args.symbols_file)
     args.symbols = ",".join(symbols)
+    start_ms, end_ms, window_label = resolve_time_window(args)
+    args.resolved_start_ms = start_ms
+    args.resolved_end_ms = end_ms
+    args.resolved_start_utc = utc_text(start_ms)
+    args.resolved_end_utc = utc_text(end_ms)
     if not symbols:
         raise SystemExit("--symbols is required unless you use a preset. Try: --preset demo, --list-presets, or --examples")
     if args.dry_run:
@@ -1846,10 +1915,13 @@ def main(argv: Iterable[str] | None = None) -> int:
                         token_side=args.gecko_token_side,
                         limit=args.gecko_limit,
                         refresh=args.refresh,
+                        start_ms=start_ms,
+                        end_ms=end_ms,
+                        window_label=window_label,
                     )
                 else:
                     inst_id = normalize_inst_id(symbol, args.inst_type, args.quote)
-                    candles = fetch_candles(inst_id, args.bar, args.days, cache_dir, refresh=args.refresh)
+                    candles = fetch_candles(inst_id, args.bar, args.days, cache_dir, refresh=args.refresh, start_ms=start_ms, end_ms=end_ms, window_label=window_label)
                 bars_by_inst[inst_id] = candles
             except Exception as exc:
                 inst_id = symbol if args.data_source == "geckoterminal" else normalize_inst_id(symbol, args.inst_type, args.quote)
@@ -1872,10 +1944,13 @@ def main(argv: Iterable[str] | None = None) -> int:
                         token_side=args.gecko_token_side,
                         limit=args.gecko_limit,
                         refresh=args.refresh,
+                        start_ms=start_ms,
+                        end_ms=end_ms,
+                        window_label=window_label,
                     )
                 else:
                     inst_id = normalize_inst_id(symbol, args.inst_type, args.quote)
-                    candles = fetch_candles(inst_id, args.bar, args.days, cache_dir, refresh=args.refresh)
+                    candles = fetch_candles(inst_id, args.bar, args.days, cache_dir, refresh=args.refresh, start_ms=start_ms, end_ms=end_ms, window_label=window_label)
                 result = backtest_symbol(inst_id, candles, args, per_symbol_balance)
             except Exception as exc:
                 inst_id = symbol if args.data_source == "geckoterminal" else normalize_inst_id(symbol, args.inst_type, args.quote)

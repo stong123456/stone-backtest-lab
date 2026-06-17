@@ -11,14 +11,14 @@ import subprocess
 import sys
 import webbrowser
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from render_visual_report import render_report
 
 
-VERSION = "hermes-backtest-lab-v2.0.0"
+VERSION = "hermes-backtest-lab-v2.1.0"
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "scripts" / "hermes_backtest_lab.py"
 DEFAULT_OUTPUT = ROOT / "outputs" / "hermes_backtest_lab_v2"
@@ -41,6 +41,26 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def parse_utc_datetime(value: str | None, default: datetime) -> datetime:
+    raw = str(value or "").strip()
+    if not raw:
+        return default
+    normalized = raw.replace("Z", "+00:00")
+    if len(normalized) == 10 and normalized[4] == "-" and normalized[7] == "-":
+        dt = datetime.strptime(normalized, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    else:
+        dt = datetime.fromisoformat(normalized)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+    return dt
+
+
+def date_arg(value: datetime) -> str:
+    return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def score_metrics(metrics: dict[str, Any]) -> float:
@@ -77,7 +97,9 @@ def run_core(label: str, base_args: list[str], params: dict[str, Any], out_root:
     visual_report = ""
     if output_dir:
         try:
-            visual_report = str(render_report(Path(output_dir), DEFAULT_CORE_CACHE))
+            run_dir = Path(output_dir)
+            run_cache = run_dir.parent / "cache"
+            visual_report = str(render_report(run_dir, run_cache if run_cache.exists() else DEFAULT_CORE_CACHE))
         except Exception as exc:
             write_json(run_out / f"{label}-visual-report-error.json", {"label": label, "output_dir": output_dir, "error": str(exc)})
     return RunResult(label=label, params=params, output_dir=output_dir, metrics=payload.get("metrics", {}), visual_report=visual_report)
@@ -181,6 +203,13 @@ def result_row(result: RunResult) -> dict[str, Any]:
     }
 
 
+def row_value_keys(rows: list[dict[str, Any]]) -> tuple[str, ...]:
+    base = ["label", "score", "return_pct", "max_drawdown_pct", "win_rate_pct", "profit_factor", "total_trades"]
+    window_keys = ["train_start", "train_end", "test_start", "test_end"]
+    keys = [*base, *(key for key in window_keys if any(row.get(key) for row in rows)), "params"]
+    return tuple(keys)
+
+
 def load_trades(output_dir: str) -> list[dict[str, Any]]:
     path = Path(output_dir) / "trades.csv"
     if not path.exists():
@@ -237,6 +266,7 @@ def percentile(sorted_values: list[float], pct: float) -> float:
 
 def html_report(path: Path, title: str, rows: list[dict[str, Any]], payload: dict[str, Any]) -> None:
     top_rows = sorted(rows, key=lambda row: safe_float(row.get("score")), reverse=True)[:30]
+    keys = row_value_keys(top_rows)
     bars = "".join(
         f"<div class='bar'><span>{escape(row['label'])}</span><b style='width:{max(2, min(100, safe_float(row.get('score')) + 30))}%'>{row.get('score')}</b></div>"
         for row in top_rows[:12]
@@ -245,7 +275,7 @@ def html_report(path: Path, title: str, rows: list[dict[str, Any]], payload: dic
         "<tr>"
         + "".join(
             f"<td>{escape(str(row.get(key, '')))}</td>"
-            for key in ("label", "score", "return_pct", "max_drawdown_pct", "win_rate_pct", "profit_factor", "total_trades", "params")
+            for key in keys
         )
         + f"<td>{report_link(row)}</td>"
         + "</tr>"
@@ -274,10 +304,10 @@ pre{{white-space:pre-wrap;background:#07101e;border:1px solid #24375d;border-rad
 </style>
 </head>
 <body><div class="wrap">
-<section class="hero"><h1>{escape(title)}</h1><p class="muted">Hermes Backtest Lab v2.0 report. Walk-forward / optimization / Monte Carlo / strategy portfolio ready.</p></section>
+<section class="hero"><h1>{escape(title)}</h1><p class="muted">石头量化回测实验室 v2.1 / Hermes Backtest Lab v2.1. Walk-forward / optimization / Monte Carlo / strategy portfolio ready.</p></section>
 <div class="grid"><div class="card"><h2>Top Scores</h2>{bars}</div><div class="card"><h2>Payload</h2><pre>{escape(json.dumps(payload, ensure_ascii=False, indent=2)[:6000])}</pre></div></div>
 <h2>Runs</h2>
-<table><thead><tr><th>label</th><th>score</th><th>return</th><th>max DD</th><th>win rate</th><th>PF</th><th>trades</th><th>params</th><th>visual report</th></tr></thead><tbody>{table}</tbody></table>
+<table><thead><tr>{''.join(f'<th>{escape(key)}</th>' for key in keys)}<th>visual report</th></tr></thead><tbody>{table}</tbody></table>
 </div></body></html>"""
     path.write_text(body, encoding="utf-8")
 
@@ -321,7 +351,7 @@ def run_optimizer(args: argparse.Namespace) -> dict[str, Any]:
     write_json(out_dir / "optimizer_summary.json", payload)
     write_csv(out_dir / "optimizer_runs.csv", rows)
     report_path = out_dir / "optimizer_report.html"
-    html_report(report_path, "Hermes Backtest Lab v2.0 参数优化报告", rows, payload)
+    html_report(report_path, "Hermes Backtest Lab v2.1 参数优化报告", rows, payload)
     opened = open_html_report(report_path) if args.open_report else False
     return {"status": "ok", "output_dir": str(out_dir), "report": str(report_path), "opened": opened, **payload}
 
@@ -335,7 +365,7 @@ def run_monte_carlo(args: argparse.Namespace) -> dict[str, Any]:
     payload = {"version": VERSION, "mode": "monte-carlo", "base_output_dir": base.output_dir, "monte_carlo": mc}
     write_json(out_dir / "monte_carlo_summary.json", payload)
     report_path = out_dir / "monte_carlo_report.html"
-    html_report(report_path, "Hermes Backtest Lab v2.0 Monte Carlo 鲁棒性报告", rows, payload)
+    html_report(report_path, "Hermes Backtest Lab v2.1 Monte Carlo 鲁棒性报告", rows, payload)
     opened = open_html_report(report_path) if args.open_report else False
     return {"status": "ok", "output_dir": str(out_dir), "report": str(report_path), "opened": opened, **payload}
 
@@ -345,13 +375,32 @@ def run_walk_forward(args: argparse.Namespace) -> dict[str, Any]:
     grid = parse_grid(args.grid) if args.grid else default_grid()
     windows: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
-    # Public v1 engine currently supports recent-N-day windows. This implements a practical rolling
-    # approximation by testing increasing recent windows, without changing v1's data loader.
+    total_days = args.train_days + args.test_days + max(args.walk_windows - 1, 0) * args.step_days
+    default_start = datetime.now(timezone.utc) - timedelta(days=total_days)
+    walk_start = parse_utc_datetime(args.walk_start_date, default_start)
     for idx in range(args.walk_windows):
-        train_days = args.train_days + idx * args.step_days
-        test_days = max(args.test_days, args.train_days // 3)
-        train_args = [*args.core_args, "--days", str(train_days)]
-        test_args_base = [*args.core_args, "--days", str(test_days)]
+        train_start = walk_start + timedelta(days=idx * args.step_days)
+        train_end = train_start + timedelta(days=args.train_days)
+        test_start = train_end
+        test_end = test_start + timedelta(days=args.test_days)
+        train_args = [
+            *args.core_args,
+            "--days",
+            str(args.train_days),
+            "--start-date",
+            date_arg(train_start),
+            "--end-date",
+            date_arg(train_end),
+        ]
+        test_args_base = [
+            *args.core_args,
+            "--days",
+            str(args.test_days),
+            "--start-date",
+            date_arg(test_start),
+            "--end-date",
+            date_arg(test_end),
+        ]
         train_sets = grid_param_sets(grid, args.walk_candidates)
         train_results: list[RunResult] = []
         for pidx, params in enumerate(train_sets, start=1):
@@ -363,21 +412,37 @@ def run_walk_forward(args: argparse.Namespace) -> dict[str, Any]:
         best_params = ranked[0].params if ranked else {}
         test_result = run_core(f"wf{idx+1}-test", test_args_base, best_params, out_dir)
         row = result_row(test_result)
-        row["train_days"] = train_days
-        row["test_days"] = test_days
+        row["train_start"] = date_arg(train_start)
+        row["train_end"] = date_arg(train_end)
+        row["test_start"] = date_arg(test_start)
+        row["test_end"] = date_arg(test_end)
+        row["train_days"] = args.train_days
+        row["test_days"] = args.test_days
         rows.append(row)
-        windows.append({"window": idx + 1, "train_days": train_days, "test_days": test_days, "best_params": best_params, "test": row})
-    payload = {"version": VERSION, "mode": "walk-forward", "windows": windows}
+        windows.append(
+            {
+                "window": idx + 1,
+                "train_start": date_arg(train_start),
+                "train_end": date_arg(train_end),
+                "test_start": date_arg(test_start),
+                "test_end": date_arg(test_end),
+                "train_days": args.train_days,
+                "test_days": args.test_days,
+                "best_params": best_params,
+                "test": row,
+            }
+        )
+    payload = {"version": VERSION, "mode": "walk-forward", "walk_start_date": date_arg(walk_start), "windows": windows}
     write_json(out_dir / "walk_forward_summary.json", payload)
     write_csv(out_dir / "walk_forward_windows.csv", rows)
     report_path = out_dir / "walk_forward_report.html"
-    html_report(report_path, "Hermes Backtest Lab v2.0 Walk-forward 报告", rows, payload)
+    html_report(report_path, "Hermes Backtest Lab v2.1 Walk-forward 报告", rows, payload)
     opened = open_html_report(report_path) if args.open_report else False
     return {"status": "ok", "output_dir": str(out_dir), "report": str(report_path), "opened": opened, **payload}
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Hermes Backtest Lab v2.0: optimizer, walk-forward, Monte Carlo and HTML reports.")
+    parser = argparse.ArgumentParser(description="Hermes Backtest Lab v2.1: optimizer, walk-forward, Monte Carlo and HTML reports.")
     parser.add_argument("--version", action="version", version=VERSION)
     parser.add_argument("--mode", choices=["grid", "genetic", "walk-forward", "monte-carlo"], default="grid")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
@@ -392,6 +457,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--step-days", type=int, default=30)
     parser.add_argument("--walk-windows", type=int, default=3)
     parser.add_argument("--walk-candidates", type=int, default=8)
+    parser.add_argument("--walk-start-date", default="", help="UTC start of the first training window. Default uses enough recent history for all windows.")
     parser.add_argument("--open-report", dest="open_report", action="store_true", default=True, help="Open the main HTML report in your default browser. Enabled by default.")
     parser.add_argument("--no-open-report", dest="open_report", action="store_false", help="Do not open the browser after the run.")
     parser.add_argument("core_args", nargs=argparse.REMAINDER, help="Arguments passed to scripts/hermes_backtest_lab.py after --")
