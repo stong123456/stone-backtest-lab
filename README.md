@@ -1,6 +1,6 @@
-# 石头量化回测实验室
+# 石头量化回测实验室 v2.0
 
-英文名：Hermes Backtest Lab。
+英文名：Hermes Backtest Lab v2.0。
 
 一个不需要 API Key 的本地加密货币回测工具。
 
@@ -209,7 +209,7 @@ python scripts/hermes_backtest_lab.py --advanced-help
 - `.env`
 - API Key、Telegram Token、交易所账户文件
 
-## Hermes Backtest Lab v2
+## Hermes Backtest Lab v2.0
 
 v2 是高级研究层，不替代原来的 v1 回测命令。它会复用 `scripts/hermes_backtest_lab.py`，在外层增加参数优化和鲁棒性分析。
 

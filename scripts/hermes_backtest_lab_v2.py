@@ -18,7 +18,7 @@ from typing import Any
 from render_visual_report import render_report
 
 
-VERSION = "hermes-backtest-lab-v2-0.2.2"
+VERSION = "hermes-backtest-lab-v2.0.0"
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "scripts" / "hermes_backtest_lab.py"
 DEFAULT_OUTPUT = ROOT / "outputs" / "hermes_backtest_lab_v2"
@@ -274,7 +274,7 @@ pre{{white-space:pre-wrap;background:#07101e;border:1px solid #24375d;border-rad
 </style>
 </head>
 <body><div class="wrap">
-<section class="hero"><h1>{escape(title)}</h1><p class="muted">Hermes Backtest Lab v2 report. Walk-forward / optimization / Monte Carlo / strategy portfolio ready.</p></section>
+<section class="hero"><h1>{escape(title)}</h1><p class="muted">Hermes Backtest Lab v2.0 report. Walk-forward / optimization / Monte Carlo / strategy portfolio ready.</p></section>
 <div class="grid"><div class="card"><h2>Top Scores</h2>{bars}</div><div class="card"><h2>Payload</h2><pre>{escape(json.dumps(payload, ensure_ascii=False, indent=2)[:6000])}</pre></div></div>
 <h2>Runs</h2>
 <table><thead><tr><th>label</th><th>score</th><th>return</th><th>max DD</th><th>win rate</th><th>PF</th><th>trades</th><th>params</th><th>visual report</th></tr></thead><tbody>{table}</tbody></table>
@@ -321,7 +321,7 @@ def run_optimizer(args: argparse.Namespace) -> dict[str, Any]:
     write_json(out_dir / "optimizer_summary.json", payload)
     write_csv(out_dir / "optimizer_runs.csv", rows)
     report_path = out_dir / "optimizer_report.html"
-    html_report(report_path, "Hermes Backtest Lab v2 参数优化报告", rows, payload)
+    html_report(report_path, "Hermes Backtest Lab v2.0 参数优化报告", rows, payload)
     opened = open_html_report(report_path) if args.open_report else False
     return {"status": "ok", "output_dir": str(out_dir), "report": str(report_path), "opened": opened, **payload}
 
@@ -335,7 +335,7 @@ def run_monte_carlo(args: argparse.Namespace) -> dict[str, Any]:
     payload = {"version": VERSION, "mode": "monte-carlo", "base_output_dir": base.output_dir, "monte_carlo": mc}
     write_json(out_dir / "monte_carlo_summary.json", payload)
     report_path = out_dir / "monte_carlo_report.html"
-    html_report(report_path, "Hermes Backtest Lab v2 Monte Carlo 鲁棒性报告", rows, payload)
+    html_report(report_path, "Hermes Backtest Lab v2.0 Monte Carlo 鲁棒性报告", rows, payload)
     opened = open_html_report(report_path) if args.open_report else False
     return {"status": "ok", "output_dir": str(out_dir), "report": str(report_path), "opened": opened, **payload}
 
@@ -371,13 +371,13 @@ def run_walk_forward(args: argparse.Namespace) -> dict[str, Any]:
     write_json(out_dir / "walk_forward_summary.json", payload)
     write_csv(out_dir / "walk_forward_windows.csv", rows)
     report_path = out_dir / "walk_forward_report.html"
-    html_report(report_path, "Hermes Backtest Lab v2 Walk-forward 报告", rows, payload)
+    html_report(report_path, "Hermes Backtest Lab v2.0 Walk-forward 报告", rows, payload)
     opened = open_html_report(report_path) if args.open_report else False
     return {"status": "ok", "output_dir": str(out_dir), "report": str(report_path), "opened": opened, **payload}
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Hermes Backtest Lab v2: optimizer, walk-forward, Monte Carlo and HTML reports.")
+    parser = argparse.ArgumentParser(description="Hermes Backtest Lab v2.0: optimizer, walk-forward, Monte Carlo and HTML reports.")
     parser.add_argument("--version", action="version", version=VERSION)
     parser.add_argument("--mode", choices=["grid", "genetic", "walk-forward", "monte-carlo"], default="grid")
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)

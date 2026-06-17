@@ -1,6 +1,6 @@
-# Hermes Backtest Lab v2 命令手册
+# Hermes Backtest Lab v2.0 命令手册
 
-v2 是研究层，不替代 v1 主回测器。它会多次调用 `scripts/hermes_backtest_lab.py`，用于参数优化、Walk-forward、Monte Carlo 和 HTML 报告。
+v2.0 是研究层，不替代 v1 主回测器。它会多次调用 `scripts/hermes_backtest_lab.py`，用于参数优化、Walk-forward、Monte Carlo 和 HTML 报告。
 
 默认行为：运行结束后会自动打开主 HTML 报告。  
 如果不想弹出浏览器，在 `--mode` 后加 `--no-open-report`。

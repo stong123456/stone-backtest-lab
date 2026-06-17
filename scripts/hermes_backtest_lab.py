@@ -17,9 +17,9 @@ import requests
 
 OKX_PUBLIC = "https://www.okx.com"
 GECKOTERMINAL_PUBLIC = "https://api.geckoterminal.com/api/v2"
-VERSION = "hermes-backtest-lab-0.1.10"
-TOOL_NAME_CN = "石头量化回测实验室"
-TOOL_NAME_EN = "Hermes Backtest Lab"
+VERSION = "hermes-backtest-lab-v2.0.0"
+TOOL_NAME_CN = "石头量化回测实验室 v2.0"
+TOOL_NAME_EN = "Hermes Backtest Lab v2.0"
 
 DEFAULT_SWAP_SYMBOLS = "BTC,ETH,SOL,XRP,DOGE,SUI,BNB,TON,TRX,LINK,AVAX,NEAR,AAVE,UNI,LTC,APT,ARB,OP,DOT,ICP"
 MEME_SWAP_SYMBOLS = "PEPE,DOGE,TRUMP,MERL,SUI,TON,ARB,OP,NEAR"
