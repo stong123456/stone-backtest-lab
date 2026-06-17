@@ -192,7 +192,13 @@ python scripts/hermes_backtest_lab.py --advanced-help
 - `SKILL.md`
 - `requirements.txt`
 - `scripts/hermes_backtest_lab.py`
+- `scripts/hermes_backtest_lab_v2.py`
+- `scripts/render_visual_report.py`
 - `examples/commands.md`
+- `examples/v2_commands.md`
+- `run_v2_grid.ps1`
+- `run_v2_monte_carlo.ps1`
+- `run_v2_walk_forward.ps1`
 - `.gitignore`
 
 不要提交：
@@ -202,3 +208,60 @@ python scripts/hermes_backtest_lab.py --advanced-help
 - `cache/`
 - `.env`
 - API Key、Telegram Token、交易所账户文件
+
+## Hermes Backtest Lab v2
+
+v2 是高级研究层，不替代原来的 v1 回测命令。它会复用 `scripts/hermes_backtest_lab.py`，在外层增加参数优化和鲁棒性分析。
+
+核心能力：
+
+- Walk-forward 优化：训练窗口挑参数，验证窗口复测。
+- 参数网格搜索：支持多因子组合扫描。
+- 遗传算法风格优化：参数很多时先做探索式搜索。
+- Monte Carlo 模拟：随机抽样交易盈亏，观察尾部风险和破产概率。
+- 多策略/多参数组合对比：把不同参数组当成候选策略自动排名。
+- HTML 报告：生成 `optimizer_report.html`、`walk_forward_report.html`、`monte_carlo_report.html`，可用浏览器打印成 PDF。
+- 交易级页面报告：每一次实际回测都会生成 `visual_report.html`，包含收益卡片、资金曲线、回撤曲线、盈亏分布、K 线入场标记、因子差异和全部交易明细。
+- 自动弹出报告：v2 默认会打开主 HTML 汇总页；单独渲染 `visual_report.html` 也会默认打开浏览器。
+
+快速示例：
+
+```powershell
+python scripts/hermes_backtest_lab_v2.py --mode grid --limit 6 --grid entry-score=80,90 --grid max-leverage=5,10 -- --preset demo
+```
+
+如果你在服务器或不想弹出浏览器，加上：
+
+```powershell
+python scripts/hermes_backtest_lab_v2.py --mode grid --no-open-report --limit 6 --grid entry-score=80,90 --grid max-leverage=5,10 -- --preset demo
+```
+
+Monte Carlo：
+
+```powershell
+python scripts/hermes_backtest_lab_v2.py --mode monte-carlo --sims 500 -- --preset balanced
+```
+
+Walk-forward：
+
+```powershell
+python scripts/hermes_backtest_lab_v2.py --mode walk-forward --walk-windows 3 --walk-candidates 8 -- --preset balanced
+```
+
+更多命令见：
+
+```text
+examples/v2_commands.md
+```
+
+如果只想把某次 v1 回测结果转成漂亮页面报告：
+
+```powershell
+python scripts/render_visual_report.py --run-dir outputs/hermes_backtest_lab/<run_id>
+```
+
+如果只生成文件、不自动打开：
+
+```powershell
+python scripts/render_visual_report.py --run-dir outputs/hermes_backtest_lab/<run_id> --no-open
+```
