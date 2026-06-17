@@ -226,6 +226,7 @@ python scripts/hermes_backtest_lab.py --advanced-help
 - 多策略/多参数组合对比：把不同参数组当成候选策略自动排名。
 - HTML 报告：生成 `optimizer_report.html`、`walk_forward_report.html`、`monte_carlo_report.html`，可用浏览器打印成 PDF。
 - 交易级页面报告：每一次实际回测都会生成 `visual_report.html`，包含收益卡片、资金曲线、回撤曲线、盈亏分布、K 线入场标记、因子差异和全部交易明细。
+- 创作者入口：页面报告内置 `@Stone141319` 头像和 X 主页链接，方便截图传播和关注跳转。
 - 自动弹出报告：研究优化入口默认会打开主 HTML 汇总页；单独渲染 `visual_report.html` 也会默认打开浏览器。
 
 快速示例：

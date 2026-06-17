@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import html
 import json
@@ -14,6 +15,33 @@ from datetime import datetime, timezone
 from pathlib import Path
 from statistics import mean
 from typing import Any
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CREATOR_NAME = "@Stone141319"
+CREATOR_URL = "https://x.com/Stone141319"
+AVATAR_PATH = ROOT / "assets" / "stone141319-avatar.png"
+
+
+def avatar_data_uri() -> str:
+    if not AVATAR_PATH.exists():
+        return ""
+    data = base64.b64encode(AVATAR_PATH.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{data}"
+
+
+def creator_card() -> str:
+    avatar = avatar_data_uri()
+    image = f'<img src="{avatar}" alt="{CREATOR_NAME} avatar">' if avatar else '<div class="avatar-fallback">S</div>'
+    return f"""
+      <a class="creator-card" href="{CREATOR_URL}" target="_blank" rel="noopener noreferrer" aria-label="关注 {CREATOR_NAME}">
+        {image}
+        <span>
+          <b>{CREATOR_NAME}</b>
+          <em>关注我，持续更新量化回测工具和自动交易实验</em>
+        </span>
+      </a>
+    """
 
 
 def as_float(value: Any, default: float = 0.0) -> float:
@@ -462,9 +490,38 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
     .pillrow {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }}
     .pill {{ border: 1px solid var(--line); color: #cdf9dd; border-radius: 999px; padding: 8px 12px; background: rgba(255,255,255,0.04); font-size: 13px; }}
     .warn {{ border-left: 4px solid var(--gold); padding-left: 14px; color: #ffe7a7; }}
+    .hero-top {{ display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; }}
+    .creator-card {{
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 270px;
+      max-width: 360px;
+      padding: 12px 14px;
+      border: 1px solid rgba(255, 209, 102, 0.38);
+      border-radius: 999px;
+      background: rgba(255, 209, 102, 0.10);
+      color: var(--text);
+      text-decoration: none;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.20);
+    }}
+    .creator-card img, .avatar-fallback {{
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 209, 102, 0.82);
+      flex: 0 0 auto;
+      object-fit: cover;
+    }}
+    .avatar-fallback {{ display: grid; place-items: center; background: var(--gold); color: #081915; font-weight: 900; }}
+    .creator-card b {{ display: block; color: var(--gold); font-size: 17px; letter-spacing: -0.02em; }}
+    .creator-card em {{ display: block; margin-top: 2px; color: #dbeedf; font-style: normal; font-size: 12px; line-height: 1.35; }}
+    .creator-card:hover {{ transform: translateY(-1px); border-color: var(--gold); }}
     @media (max-width: 980px) {{
       .cards {{ grid-template-columns: repeat(2, 1fr); }}
       .grid {{ grid-template-columns: 1fr; }}
+      .hero-top {{ flex-direction: column; }}
+      .creator-card {{ min-width: 0; width: 100%; border-radius: 24px; }}
     }}
     @media (max-width: 620px) {{
       .wrap {{ padding: 18px; }}
@@ -478,8 +535,13 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
 <body>
   <main class="wrap">
     <section class="hero">
-      <div class="stamp">石头量化回测实验室 v2.1 / Hermes Backtest Lab v2.1</div>
-      <h1>自动交易回测页面报告</h1>
+      <div class="hero-top">
+        <div>
+          <div class="stamp">石头量化回测实验室 v2.1 / Hermes Backtest Lab v2.1</div>
+          <h1>自动交易回测页面报告</h1>
+        </div>
+        {creator_card()}
+      </div>
       <div class="subtitle">
         数据来源：{html.escape(str(run_dir.name))}。本页为离线自包含报告，可直接用浏览器打开。
         资金曲线按逐笔平仓盈亏重建，K线来自本地 OKX 1H 缓存，并叠加代表性交易入场标记。

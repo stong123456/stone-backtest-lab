@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import itertools
 import json
@@ -23,6 +24,9 @@ ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "scripts" / "hermes_backtest_lab.py"
 DEFAULT_OUTPUT = ROOT / "outputs" / "hermes_backtest_lab_v2"
 DEFAULT_CORE_CACHE = ROOT / "outputs" / "hermes_backtest_lab" / "cache"
+CREATOR_NAME = "@Stone141319"
+CREATOR_URL = "https://x.com/Stone141319"
+AVATAR_PATH = ROOT / "assets" / "stone141319-avatar.png"
 
 
 @dataclass
@@ -61,6 +65,24 @@ def parse_utc_datetime(value: str | None, default: datetime) -> datetime:
 
 def date_arg(value: datetime) -> str:
     return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def avatar_data_uri() -> str:
+    if not AVATAR_PATH.exists():
+        return ""
+    data = base64.b64encode(AVATAR_PATH.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{data}"
+
+
+def creator_card() -> str:
+    avatar = avatar_data_uri()
+    image = f'<img src="{avatar}" alt="{CREATOR_NAME} avatar">' if avatar else '<div class="avatar-fallback">S</div>'
+    return f"""
+    <a class="creator-card" href="{CREATOR_URL}" target="_blank" rel="noopener noreferrer" aria-label="关注 {CREATOR_NAME}">
+      {image}
+      <span><b>{CREATOR_NAME}</b><em>关注我，持续更新量化回测工具和自动交易实验</em></span>
+    </a>
+    """
 
 
 def score_metrics(metrics: dict[str, Any]) -> float:
@@ -301,10 +323,17 @@ table{{width:100%;border-collapse:collapse;margin-top:24px;background:#0e172a;bo
 th,td{{border-bottom:1px solid #22365e;padding:10px;font-size:12px;text-align:left;vertical-align:top;}}
 th{{background:#162342;color:#cfe0ff;}}
 pre{{white-space:pre-wrap;background:#07101e;border:1px solid #24375d;border-radius:18px;padding:16px;max-height:420px;overflow:auto;}}
+.hero-top{{display:flex;align-items:flex-start;justify-content:space-between;gap:22px;}}
+.creator-card{{display:flex;align-items:center;gap:12px;min-width:270px;max-width:380px;padding:12px 14px;border:1px solid rgba(255,209,102,.42);border-radius:999px;background:rgba(255,209,102,.10);color:#edf3ff;text-decoration:none;}}
+.creator-card img,.avatar-fallback{{width:58px;height:58px;border-radius:50%;border:2px solid rgba(255,209,102,.86);object-fit:cover;flex:0 0 auto;}}
+.avatar-fallback{{display:grid;place-items:center;background:#ffd166;color:#08111f;font-weight:900;}}
+.creator-card b{{display:block;color:#ffd166;font-size:17px;}}
+.creator-card em{{display:block;margin-top:2px;color:#cfd9eb;font-style:normal;font-size:12px;line-height:1.35;}}
+@media(max-width:860px){{.grid{{grid-template-columns:1fr;}}.hero-top{{flex-direction:column;}}.creator-card{{width:100%;min-width:0;border-radius:22px;}}}}
 </style>
 </head>
 <body><div class="wrap">
-<section class="hero"><h1>{escape(title)}</h1><p class="muted">石头量化回测实验室 v2.1 / Hermes Backtest Lab v2.1. Walk-forward / optimization / Monte Carlo / strategy portfolio ready.</p></section>
+<section class="hero"><div class="hero-top"><div><h1>{escape(title)}</h1><p class="muted">石头量化回测实验室 v2.1 / Hermes Backtest Lab v2.1. Walk-forward / optimization / Monte Carlo / strategy portfolio ready.</p></div>{creator_card()}</div></section>
 <div class="grid"><div class="card"><h2>Top Scores</h2>{bars}</div><div class="card"><h2>Payload</h2><pre>{escape(json.dumps(payload, ensure_ascii=False, indent=2)[:6000])}</pre></div></div>
 <h2>Runs</h2>
 <table><thead><tr>{''.join(f'<th>{escape(key)}</th>' for key in keys)}<th>visual report</th></tr></thead><tbody>{table}</tbody></table>
