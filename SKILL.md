@@ -15,7 +15,7 @@ Current script version: `hermes-backtest-lab-v2.2.0`.
 
 - Uses OKX, Bitget, and GeckoTerminal public market endpoints only.
 - Does not read `.env`, account files, API keys, Telegram tokens, or live positions.
-- Writes only local reports, trade CSVs, and metrics JSON under the chosen output directory.
+- Writes only local reports, trade CSVs, metrics JSON, and optional HTML reports under the chosen output directory.
 - Designed for research. Do not treat historical backtest performance as a live trading guarantee.
 
 ## Quick Start
@@ -26,7 +26,7 @@ Run from the skill folder or pass the script path explicitly:
 python .\scripts\hermes_backtest_lab.py --preset demo
 ```
 
-Useful examples:
+Useful commands:
 
 ```powershell
 # Print the short Chinese beginner menu.
@@ -43,7 +43,11 @@ python .\scripts\hermes_backtest_lab.py --examples
 
 # Print the full advanced parameter reference.
 python .\scripts\hermes_backtest_lab.py --advanced-help
+```
 
+## Common Backtests
+
+```powershell
 # Beginner smoke test.
 python .\scripts\hermes_backtest_lab.py --preset demo
 
@@ -60,31 +64,43 @@ python .\scripts\hermes_backtest_lab.py --preset onchain-demo
 .\run_demo.ps1
 .\run_balanced.ps1
 .\run_onchain_demo.ps1
+.\run_bitget_90d.ps1
+```
 
-# Backtest any OKX USDT perpetual symbols.
+## OKX Examples
+
+```powershell
+# Backtest OKX USDT perpetual symbols.
 python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL,SUI,LINK --inst-type SWAP --days 180 --bar 1H
 
 # Backtest OKX spot symbols.
 python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SUI --inst-type SPOT --days 180 --bar 1H --allow-short false
 
+# Use full OKX instIds directly.
+python .\scripts\hermes_backtest_lab.py --symbols BTC-USDT-SWAP,ETH-USDT-SWAP --days 90 --bar 4H
+```
+
+## Bitget Examples
+
+```powershell
 # Backtest Bitget USDT perpetual symbols.
-python .\scripts\hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL --inst-type SWAP --days 90 --bar 1H
+python .\scripts\hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL,SUI --inst-type SWAP --days 90 --bar 1H
 
 # Backtest Bitget spot symbols.
 python .\scripts\hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL --inst-type SPOT --allow-short false --base-leverage 1 --max-leverage 1 --days 90 --bar 1H
 
-# Use full OKX instIds directly.
-python .\scripts\hermes_backtest_lab.py --symbols BTC-USDT-SWAP,ETH-USDT-SWAP --days 90 --bar 4H
+# Bitget hackathon-style shared portfolio replay.
+python .\scripts\hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL,SUI --inst-type SWAP --days 90 --bar 1H --portfolio-mode 1 --starting-balance 100000 --min-margin 2000 --max-margin 5000
+```
 
-# Test short-only or long-only variants.
-python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL --inst-type SWAP --days 180 --allow-long false
-python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL --inst-type SWAP --days 180 --allow-short false
+## On-chain Examples
 
-# Make entries stricter and costs higher.
-python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH --days 180 --entry-score 90 --fee-bps 5 --slippage-bps 5
+```powershell
+# Token mode: chain:token:contract. The script selects a high-liquidity pool from GeckoTerminal.
+python .\scripts\hermes_backtest_lab.py --data-source geckoterminal --symbols base:token:0x4200000000000000000000000000000000000006 --days 30 --bar 1H
 
-# Use one shared portfolio account instead of splitting capital by symbol.
-python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL,SUI,LINK --inst-type SWAP --days 180 --portfolio-mode 1 --starting-balance 100000 --min-margin 2000 --max-margin 5000
+# Pool mode: chain:pool:pool_address.
+python .\scripts\hermes_backtest_lab.py --data-source geckoterminal --symbols base:pool:0xPOOL_ADDRESS --days 30 --bar 1H
 ```
 
 ## Workflow
@@ -95,21 +111,24 @@ python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL,SUI,LINK --inst-ty
 4. Score long and short setups using Hermes-style trend and range logic.
 5. Apply the optional oracle-180d profile layer: ATR/ADX bands, pullback-long and rebound-short style tags, late-extension rejection, leverage caps, margin scaling, fast adverse exits, large-margin ATR gates, volume-heat filters, and per-trade trend hold windows.
 6. Simulate entries, dynamic margin, dynamic leverage, TP/SL, time exits, account-stop liquidation, fees, and slippage.
-7. Write:
-   - `report.md`
-   - `trades.csv`
-   - `metrics.json`
-   - cached candle JSON under `cache/`
-   - optional `visual_report.html` with full-period K-lines, token selector, zoom/pan, and entry/exit markers
+7. Write `report.md`, `trades.csv`, `metrics.json`, cached candle JSON, and optional `visual_report.html`.
 
-## Public Presets
+## v2 Research Entry
 
-- `demo`: 30-day BTC/ETH smoke test.
-- `conservative`: blue-chip perpetuals, lower exposure, stricter ATR.
-- `balanced`: default public 180-day portfolio replay.
-- `aggressive`: higher-volatility altcoin/meme research preset.
-- `spot`: spot-only long replay.
-- `onchain-demo`: Base WETH token replay through GeckoTerminal.
+Use `scripts/hermes_backtest_lab_v2.py` for:
+
+- grid search
+- genetic-style parameter search
+- Walk-forward validation
+- Monte Carlo robustness testing
+- HTML optimizer reports
+
+Examples are in:
+
+```text
+examples/commands.md
+examples/v2_commands.md
+```
 
 ## Reading Results
 
@@ -120,17 +139,3 @@ Focus on:
 - Number of trades; too few trades can be sample noise.
 - Consecutive losses and average loss.
 - Factor attribution: whether winners really had stronger ADX, volume, trend slope, or range reversion.
-
-## Suggested 180 Day Review
-
-Use broad symbols first:
-
-```powershell
-python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL,SUI,LINK,BNB,XRP,DOGE,ADA,AVAX,NEAR,APT,ARB,OP,LTC,TRX,DOT,UNI,AAVE --inst-type SWAP --days 180 --bar 1H
-```
-
-Then compare stricter gates:
-
-```powershell
-python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL,SUI,LINK --inst-type SWAP --days 180 --portfolio-mode 1 --starting-balance 100000 --min-margin 2000 --max-margin 5000 --entry-score 90 --bt-large-margin-min-atr-pct 1.8 --oracle-trend-hold-bars 48
-```

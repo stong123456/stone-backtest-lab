@@ -1,0 +1,13 @@
+# Bitget public market examples.
+# Use with:
+# python scripts/hermes_backtest_lab.py --data-source bitget --symbols-file examples/symbols_bitget_bluechip.txt --inst-type SWAP --days 90
+BTC
+ETH
+SOL
+SUI
+BNB
+XRP
+DOGE
+LINK
+AVAX
+NEAR
