@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>石头量化回测实验室报告</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07120f;
+      --card: #10231d;
+      --line: #295847;
+      --text: #f4f0dc;
+      --muted: #aebcaf;
+      --gold: #f0c45c;
+      --green: #40d781;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      background:
+        radial-gradient(circle at 20% 10%, rgba(64, 215, 129, .18), transparent 28rem),
+        radial-gradient(circle at 80% 20%, rgba(240, 196, 92, .14), transparent 24rem),
+        var(--bg);
+      color: var(--text);
+      padding: 48px 18px;
+    }
+    main {
+      width: min(920px, 100%);
+      margin: 0 auto;
+      border: 1px solid var(--line);
+      background: rgba(16, 35, 29, .82);
+      box-shadow: 0 20px 80px rgba(0, 0, 0, .32);
+      padding: 32px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(28px, 5vw, 52px);
+      letter-spacing: .04em;
+    }
+    p {
+      margin: 0 0 28px;
+      color: var(--muted);
+      line-height: 1.8;
+    }
+    a {
+      color: var(--text);
+      text-decoration: none;
+    }
+    .report {
+      display: block;
+      border: 1px solid var(--line);
+      padding: 20px;
+      background: rgba(7, 18, 15, .68);
+      transition: transform .18s ease, border-color .18s ease;
+    }
+    .report:hover {
+      transform: translateY(-2px);
+      border-color: var(--gold);
+    }
+    .tag {
+      display: inline-block;
+      margin-bottom: 12px;
+      padding: 4px 10px;
+      border: 1px solid rgba(64, 215, 129, .48);
+      color: var(--green);
+      font-size: 13px;
+      letter-spacing: .08em;
+    }
+    h2 {
+      margin: 0 0 10px;
+      font-size: 24px;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>石头量化回测实验室报告</h1>
+    <p>这里收录可分享的回测可视化页面，打开后可以查看收益曲线、回撤、K线与交易标记、逐笔交易明细。</p>
+    <a class="report" href="./bitget_90d_hermes_auto_20260618.html">
+      <span class="tag">Bitget v2.2</span>
+      <h2>Bitget 90天 Hermes Auto 回测报告</h2>
+      <div class="meta">数据源：Bitget 公开行情 · 周期：90天 · 报告生成日：2026-06-18</div>
+    </a>
+  </main>
+</body>
+</html>
