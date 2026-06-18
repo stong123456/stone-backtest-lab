@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import bisect
 import csv
 import html
 import json
@@ -102,10 +103,16 @@ def load_trades(path: Path) -> list[dict[str, Any]]:
 
 
 def load_candles(cache_dir: Path, inst_id: str) -> list[dict[str, float]]:
-    prefix = inst_id.replace("-", "_") + "_1H_"
+    prefix = inst_id.replace("-", "_").replace(":", "_") + "_1H_"
+    bitget_prefix = ""
+    if inst_id.startswith("BITGET:"):
+        bitget_symbol = inst_id.split(":", 1)[1]
+        bitget_prefix = f"BITGET_{bitget_symbol}_"
     preferred = cache_dir / f"{prefix}180d.json"
     candidates = [preferred] if preferred.exists() else []
     candidates.extend(sorted(cache_dir.glob(f"{prefix}*.json"), key=lambda item: item.stat().st_mtime, reverse=True))
+    if bitget_prefix:
+        candidates.extend(sorted(cache_dir.glob(f"{bitget_prefix}*.json"), key=lambda item: item.stat().st_mtime, reverse=True))
     path = next((item for item in candidates if item.exists()), None)
     if path is None:
         return []
@@ -138,6 +145,44 @@ def load_candles(cache_dir: Path, inst_id: str) -> list[dict[str, float]]:
                 }
             )
     return sorted([c for c in candles if c["ts"]], key=lambda x: x["ts"])
+
+
+def symbol_from_cache_path(path: Path) -> str:
+    stem = path.stem
+    if "_1H_" not in stem:
+        return ""
+    base = stem.split("_1H_", 1)[0]
+    if base.startswith("BITGET_"):
+        parts = base.split("_")
+        if len(parts) >= 2:
+            return f"BITGET:{parts[1]}"
+        return ""
+    parts = base.split("_")
+    if len(parts) >= 3 and parts[-1] in {"SWAP", "FUTURES", "MARGIN"}:
+        return "-".join(parts[-3:])
+    if len(parts) >= 2:
+        return "-".join(parts[-2:])
+    return ""
+
+
+def available_kline_symbols(trades: list[dict[str, Any]], cache_dir: Path) -> list[str]:
+    counts = Counter(t.get("inst_id", "") for t in trades)
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for inst, _ in counts.most_common():
+        if inst and inst not in seen and load_candles(cache_dir, inst):
+            ordered.append(inst)
+            seen.add(inst)
+    cached = sorted(
+        {symbol_from_cache_path(path) for path in cache_dir.glob("*_1H_*.json")}
+        - {""}
+        - seen
+    )
+    for inst in cached:
+        if load_candles(cache_dir, inst):
+            ordered.append(inst)
+            seen.add(inst)
+    return ordered
 
 
 def polyline(points: list[tuple[float, float]], width: int, height: int, pad: int = 28) -> str:
@@ -271,10 +316,10 @@ def render_pnl_bars(trades: list[dict[str, Any]], width: int, height: int) -> st
 def pick_kline_symbol(trades: list[dict[str, Any]], cache_dir: Path) -> str:
     counts = Counter(t.get("inst_id", "") for t in trades)
     for inst, _ in counts.most_common():
-        if (cache_dir / (inst.replace("-", "_") + "_1H_180d.json")).exists():
+        if inst and load_candles(cache_dir, inst):
             return inst
-    for fallback in ("BTC-USDT-SWAP", "ETH-USDT-SWAP", "SUI-USDT-SWAP"):
-        if (cache_dir / (fallback.replace("-", "_") + "_1H_180d.json")).exists():
+    for fallback in ("BTC-USDT-SWAP", "ETH-USDT-SWAP", "SUI-USDT-SWAP", "BITGET:BTCUSDT", "BITGET:ETHUSDT"):
+        if load_candles(cache_dir, fallback):
             return fallback
     return ""
 
@@ -284,55 +329,80 @@ def render_kline(candles: list[dict[str, float]], trades: list[dict[str, Any]], 
     if not candles:
         return '<div class="empty">暂无K线缓存</div>'
     inst_trades = [t for t in trades if t.get("inst_id") == inst_id]
-    center_ts = inst_trades[0]["_entry_ts"] if inst_trades else candles[-1]["ts"]
-    before = [c for c in candles if c["ts"] <= center_ts]
-    start_index = max(0, len(before) - 70)
-    window = candles[start_index : start_index + 140] or candles[-140:]
+    # Use the full cached backtest period. A local trade window is easier to read,
+    # but it hides most of the tested regime and makes 90d/180d reports misleading.
+    window = candles
     lows = [c["low"] for c in window]
     highs = [c["high"] for c in window]
     min_p, max_p = min(lows), max(highs)
     if math.isclose(min_p, max_p):
         max_p += 1
     step = (width - pad * 2) / max(len(window), 1)
-    body_w = max(3, step * 0.58)
+    body_w = max(0.6, min(5.0, step * 0.72))
+    wick_w = 1.2 if len(window) <= 500 else 0.65
 
     def y(price: float) -> float:
         return height - pad - (price - min_p) / (max_p - min_p) * (height - pad * 2)
 
+    times = [int(c["ts"]) for c in window]
+
+    def x_for_index(index: int) -> float:
+        return pad + index * step + step / 2
+
     def x_at(ts: int) -> float:
         if not window:
             return pad
-        first = window[0]["ts"]
-        last = window[-1]["ts"]
-        if first == last:
-            return pad
-        return pad + (ts - first) / (last - first) * (width - pad * 2)
+        if ts <= times[0]:
+            return x_for_index(0)
+        if ts >= times[-1]:
+            return x_for_index(len(times) - 1)
+        pos = bisect.bisect_left(times, ts)
+        if pos < len(times) and times[pos] == ts:
+            return x_for_index(pos)
+        left = max(0, pos - 1)
+        right = min(len(times) - 1, pos)
+        if left == right or times[right] == times[left]:
+            return x_for_index(left)
+        ratio = (ts - times[left]) / (times[right] - times[left])
+        return x_for_index(left) + ratio * (x_for_index(right) - x_for_index(left))
 
     candle_svg = []
     for idx, c in enumerate(window):
-        x = pad + idx * step + step / 2
+        x = x_for_index(idx)
         color = "#4ef09a" if c["close"] >= c["open"] else "#ff6868"
         top = min(y(c["open"]), y(c["close"]))
         bottom = max(y(c["open"]), y(c["close"]))
         candle_svg.append(
-            f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{y(c["high"]):.1f}" y2="{y(c["low"]):.1f}" stroke="{color}" stroke-width="1.4" opacity="0.95"/>'
-            f'<rect x="{x - body_w / 2:.1f}" y="{top:.1f}" width="{body_w:.1f}" height="{max(1.5, bottom - top):.1f}" rx="2" fill="{color}" opacity="0.78"/>'
+            f'<line class="k-candle-wick" data-x="{x:.4f}" data-y1="{y(c["high"]):.4f}" data-y2="{y(c["low"]):.4f}" x1="{x:.1f}" x2="{x:.1f}" y1="{y(c["high"]):.1f}" y2="{y(c["low"]):.1f}" stroke="{color}" stroke-width="{wick_w:.2f}" opacity="0.95"/>'
+            f'<rect class="k-candle-body" data-x="{x:.4f}" data-base-width="{body_w:.4f}" data-y="{top:.4f}" data-height="{max(1.5, bottom - top):.4f}" x="{x - body_w / 2:.1f}" y="{top:.1f}" width="{body_w:.1f}" height="{max(1.5, bottom - top):.1f}" rx="2" fill="{color}" opacity="0.78"/>'
         )
 
     markers = []
     first_ts, last_ts = window[0]["ts"], window[-1]["ts"]
     for trade in inst_trades:
-        if not (first_ts <= trade["_entry_ts"] <= last_ts):
-            continue
-        x = x_at(trade["_entry_ts"])
-        price_y = y(trade["_entry"])
         side = trade.get("side", "")
-        color = "#47f7ff" if side == "long" else "#ffd166"
-        markers.append(
-            f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{pad}" y2="{height - pad}" stroke="{color}" opacity="0.22"/>'
-            f'<circle cx="{x:.1f}" cy="{price_y:.1f}" r="6" fill="{color}" stroke="#06110f" stroke-width="2"/>'
-            f'<text x="{x + 8:.1f}" y="{price_y - 8:.1f}" fill="{color}" font-size="12">{html.escape(side.upper())}</text>'
-        )
+        entry_color = "#47f7ff" if side == "long" else "#ffd166"
+        if first_ts <= trade["_entry_ts"] <= last_ts:
+            x = x_at(trade["_entry_ts"])
+            price_y = y(trade["_entry"])
+            markers.append(
+                f'<g class="trade-marker" data-x="{x:.4f}" data-y="{price_y:.4f}">'
+                f'<line class="marker-guide" x1="0" x2="0" y1="{pad - price_y:.1f}" y2="{height - pad - price_y:.1f}" stroke="{entry_color}" opacity="0.20"/>'
+                f'<circle cx="0" cy="0" r="6" fill="{entry_color}" stroke="#06110f" stroke-width="2"/>'
+                f'<text x="8" y="-8" fill="{entry_color}" font-size="12">{html.escape(side.upper())} IN</text>'
+                f'</g>'
+            )
+        if first_ts <= trade["_exit_ts"] <= last_ts:
+            x = x_at(trade["_exit_ts"])
+            price_y = y(trade["_exit"])
+            exit_color = "#4ef09a" if trade["_pnl"] >= 0 else "#ff6868"
+            markers.append(
+                f'<g class="trade-marker" data-x="{x:.4f}" data-y="{price_y:.4f}">'
+                f'<line class="marker-guide" x1="0" x2="0" y1="{pad - price_y:.1f}" y2="{height - pad - price_y:.1f}" stroke="{exit_color}" opacity="0.18" stroke-dasharray="4 5"/>'
+                f'<rect x="-5" y="-5" width="10" height="10" rx="2" fill="{exit_color}" stroke="#06110f" stroke-width="2"/>'
+                f'<text x="8" y="16" fill="{exit_color}" font-size="12">OUT {trade["_pnl"]:+.1f}U</text>'
+                f'</g>'
+            )
     grid = []
     for i in range(5):
         gy = pad + i * (height - pad * 2) / 4
@@ -345,12 +415,47 @@ def render_kline(candles: list[dict[str, float]], trades: list[dict[str, Any]], 
     <svg viewBox="0 0 {width} {height}" class="kline">
       <rect x="0" y="0" width="{width}" height="{height}" rx="24" fill="#071712"/>
       {''.join(grid)}
-      {''.join(candle_svg)}
-      {''.join(markers)}
-      <text x="{pad}" y="30" fill="#f7fff8" font-size="18" font-weight="800">{html.escape(inst_id)} 1H K线与入场标记</text>
-      <text x="{pad}" y="{height - 16}" fill="#9eb3a6" font-size="12">{fmt_time(int(window[0]["ts"]))} 至 {fmt_time(int(window[-1]["ts"]))}</text>
+      <g class="zoom-layer" data-start="0" data-end="{width}">
+        {''.join(candle_svg)}
+      </g>
+      <g class="marker-layer">{''.join(markers)}</g>
+      <text x="{pad}" y="30" fill="#f7fff8" font-size="18" font-weight="800">{html.escape(inst_id)} 1H 全周期K线与入场/出场标记</text>
+      <text x="{pad}" y="{height - 16}" fill="#9eb3a6" font-size="12">{fmt_time(int(window[0]["ts"]))} 至 {fmt_time(int(window[-1]["ts"]))}，共 {len(window)} 根K线</text>
     </svg>
     """
+
+
+def render_kline_selector(symbols: list[str], selected: str) -> str:
+    if not symbols:
+        return ""
+    options = []
+    for symbol in symbols:
+        selected_attr = " selected" if symbol == selected else ""
+        options.append(f'<option value="{html.escape(symbol)}"{selected_attr}>{html.escape(symbol)}</option>')
+    return f"""
+    <div class="kline-toolbar">
+      <label for="kline-symbol">选择K线标的</label>
+      <select id="kline-symbol" aria-label="选择K线标的">
+        {''.join(options)}
+      </select>
+      <button type="button" id="kline-reset">重置缩放</button>
+    </div>
+    """
+
+
+def render_kline_panels(symbols: list[str], cache_dir: Path, trades: list[dict[str, Any]], selected: str) -> str:
+    if not symbols:
+        return '<div class="empty">暂无可选择的K线缓存</div>'
+    panels = []
+    for symbol in symbols:
+        candles = load_candles(cache_dir, symbol)
+        active = " active" if symbol == selected else ""
+        panels.append(
+            f'<div class="kline-panel{active}" data-symbol="{html.escape(symbol)}">'
+            f'{render_kline(candles, trades, symbol)}'
+            '</div>'
+        )
+    return "".join(panels)
 
 
 def render_trade_table(trades: list[dict[str, Any]], limit: int | None = None) -> str:
@@ -391,8 +496,12 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
     start_balance = as_float(metrics.get("starting_balance"), 100000.0)
     equity_curve = build_equity_curve(trades, start_balance)
     drawdown_curve = build_drawdown_curve(equity_curve)
+    kline_symbols = available_kline_symbols(trades, cache_dir)
     symbol = pick_kline_symbol(trades, cache_dir)
-    candles = load_candles(cache_dir, symbol) if symbol else []
+    if symbol not in kline_symbols:
+        symbol = kline_symbols[0] if kline_symbols else ""
+    config = metrics.get("config") or {}
+    data_source = str(config.get("data_source") or "okx").upper()
 
     errors = metrics.get("errors") or []
     factors = metrics.get("factor_attribution") or []
@@ -412,7 +521,7 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>石头量化回测实验室 v2.1 页面报告</title>
+  <title>石头量化回测实验室 v2.2 页面报告</title>
   <style>
     :root {{
       --bg: #04100d;
@@ -481,6 +590,34 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
     .section.full {{ grid-column: 1 / -1; }}
     h2 {{ margin: 0 0 14px; font-size: 20px; letter-spacing: -0.02em; }}
     .chart, .kline {{ width: 100%; display: block; }}
+    .kline-toolbar {{ display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 14px; }}
+    .kline-toolbar label {{ color: #c9ffdd; font-weight: 800; font-size: 13px; letter-spacing: 0.04em; }}
+    .kline-toolbar select {{
+      min-width: 240px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 10px 14px;
+      color: var(--text);
+      background: rgba(6, 20, 16, 0.95);
+      outline: none;
+    }}
+    .kline-toolbar button {{
+      border: 1px solid rgba(255, 209, 102, 0.42);
+      border-radius: 14px;
+      padding: 10px 14px;
+      color: #ffe7a7;
+      background: rgba(255, 209, 102, 0.10);
+      cursor: pointer;
+      font-weight: 800;
+    }}
+    .kline-toolbar button:hover {{ background: rgba(255, 209, 102, 0.18); }}
+    .kline-panel {{ display: none; }}
+    .kline-panel.active {{ display: block; }}
+    .kline {{ cursor: grab; user-select: none; touch-action: none; }}
+    .kline.dragging {{ cursor: grabbing; }}
+    .zoom-layer {{ transform-box: fill-box; transform-origin: 0 0; }}
+    .marker-layer {{ pointer-events: none; }}
+    .trade-marker text {{ paint-order: stroke; stroke: #06110f; stroke-width: 3px; stroke-linejoin: round; }}
     .mini {{ color: var(--muted); font-size: 13px; line-height: 1.7; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 13px; overflow: hidden; }}
     th, td {{ padding: 12px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }}
@@ -489,6 +626,7 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
     .empty {{ color: var(--muted); padding: 36px; border: 1px dashed var(--line); border-radius: 18px; }}
     .pillrow {{ display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }}
     .pill {{ border: 1px solid var(--line); color: #cdf9dd; border-radius: 999px; padding: 8px 12px; background: rgba(255,255,255,0.04); font-size: 13px; }}
+    .pill.major {{ border-color: rgba(255, 209, 102, 0.62); color: #ffe7a7; background: rgba(255, 209, 102, 0.13); font-weight: 900; }}
     .warn {{ border-left: 4px solid var(--gold); padding-left: 14px; color: #ffe7a7; }}
     .hero-top {{ display: flex; align-items: flex-start; justify-content: space-between; gap: 22px; }}
     .creator-card {{
@@ -537,14 +675,14 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
     <section class="hero">
       <div class="hero-top">
         <div>
-          <div class="stamp">石头量化回测实验室 v2.1 / Hermes Backtest Lab v2.1</div>
+          <div class="stamp">石头量化回测实验室 v2.2 / Hermes Backtest Lab v2.2</div>
           <h1>自动交易回测页面报告</h1>
         </div>
         {creator_card()}
       </div>
       <div class="subtitle">
         数据来源：{html.escape(str(run_dir.name))}。本页为离线自包含报告，可直接用浏览器打开。
-        资金曲线按逐笔平仓盈亏重建，K线来自本地 OKX 1H 缓存，并叠加代表性交易入场标记。
+        资金曲线按逐笔平仓盈亏重建，K线来自本地 {html.escape(data_source)} 1H 缓存，并叠加代表性交易的入场与出场标记。
       </div>
       <div class="cards">
         <div class="card"><div class="label">总收益</div><div class="value {'good' if as_float(metrics.get('total_return_pct')) >= 0 else 'bad'}">{fmt_pct(as_float(metrics.get('total_return_pct')))}</div></div>
@@ -557,6 +695,8 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
         <div class="card"><div class="label">最大亏损单</div><div class="value bad">{fmt_money(worst)}</div></div>
       </div>
       <div class="pillrow">
+        <span class="pill major">Bitget 行情源已接入</span>
+        <span class="pill major">支持现货与 USDT 永续回测</span>
         <span class="pill">平均分 {avg_score:.1f}</span>
         <span class="pill">盈利单 {len(winners)}</span>
         <span class="pill">亏损单 {len(losers)}</span>
@@ -583,8 +723,9 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
       </div>
       <div class="section full">
         <h2>K线与交易标记</h2>
-        {render_kline(candles, trades, symbol)}
-        <p class="mini">圆点代表该标的在窗口内的入场位置。蓝色为多单，黄色为空单。为了保持页面轻量，这里展示代表性标的与局部窗口。</p>
+        {render_kline_selector(kline_symbols, symbol)}
+        {render_kline_panels(kline_symbols, cache_dir, trades, symbol)}
+        <p class="mini">圆点代表入场，方块代表出场；蓝色为多单入场，黄色为空单入场，绿色为盈利出场，红色为亏损出场。这里按回测缓存完整周期展示，90天回测显示90天K线，180天回测显示180天K线；下拉框可切换本次报告中有本地K线缓存的任意标的。</p>
       </div>
       <div class="section">
         <h2>因子差异</h2>
@@ -619,6 +760,142 @@ def render_report(run_dir: Path, cache_dir: Path, output: Path | None = None) ->
       </div>
     </section>
   </main>
+  <script>
+    (() => {{
+      const selector = document.getElementById("kline-symbol");
+      if (!selector) return;
+      const panels = Array.from(document.querySelectorAll(".kline-panel"));
+      const reset = document.getElementById("kline-reset");
+      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+      const width = 1160;
+      const maxScale = 18;
+      const minSpan = width / maxScale;
+
+      const xMap = (rawX, start, end) => ((rawX - start) / (end - start)) * width;
+
+      const applyWindow = (svg, start, end) => {{
+        const layer = svg.querySelector(".zoom-layer");
+        if (!layer) return;
+        let nextStart = start;
+        let nextEnd = end;
+        const span = Math.max(minSpan, nextEnd - nextStart);
+        if (nextStart < 0) {{
+          nextEnd -= nextStart;
+          nextStart = 0;
+        }}
+        if (nextEnd > width) {{
+          nextStart -= nextEnd - width;
+          nextEnd = width;
+        }}
+        nextStart = clamp(nextStart, 0, width - span);
+        nextEnd = nextStart + span;
+        layer.dataset.start = String(nextStart);
+        layer.dataset.end = String(nextEnd);
+        const zoomRatio = width / (nextEnd - nextStart);
+
+        svg.querySelectorAll(".k-candle-wick").forEach((wick) => {{
+          const rawX = Number(wick.dataset.x || "0");
+          const sx = xMap(rawX, nextStart, nextEnd);
+          const visible = sx >= -20 && sx <= width + 20;
+          wick.style.display = visible ? "" : "none";
+          if (!visible) return;
+          wick.setAttribute("x1", sx);
+          wick.setAttribute("x2", sx);
+        }});
+
+        svg.querySelectorAll(".k-candle-body").forEach((body) => {{
+          const rawX = Number(body.dataset.x || "0");
+          const sx = xMap(rawX, nextStart, nextEnd);
+          const visible = sx >= -20 && sx <= width + 20;
+          body.style.display = visible ? "" : "none";
+          if (!visible) return;
+          const baseWidth = Number(body.dataset.baseWidth || "1");
+          const nextWidth = clamp(baseWidth * zoomRatio, 0.8, 14);
+          body.setAttribute("x", sx - nextWidth / 2);
+          body.setAttribute("width", nextWidth);
+        }});
+
+        svg.querySelectorAll(".trade-marker").forEach((marker) => {{
+          const rawX = Number(marker.dataset.x || "0");
+          const rawY = Number(marker.dataset.y || "0");
+          const sx = xMap(rawX, nextStart, nextEnd);
+          const visible = sx >= -30 && sx <= width + 30;
+          marker.style.display = visible ? "" : "none";
+          if (visible) marker.setAttribute("transform", `translate(${{sx}} ${{rawY}})`);
+        }});
+      }};
+
+      const resetZoom = (panel) => {{
+        const svg = panel?.querySelector(".kline");
+        if (svg) applyWindow(svg, 0, width);
+      }};
+
+      const activate = (symbol) => {{
+        panels.forEach((panel) => {{
+          panel.classList.toggle("active", panel.dataset.symbol === symbol);
+        }});
+      }};
+
+      panels.forEach((panel) => {{
+        const svg = panel.querySelector(".kline");
+        const layer = svg?.querySelector(".zoom-layer");
+        if (!svg || !layer) return;
+        applyWindow(svg, 0, width);
+
+        svg.addEventListener("wheel", (event) => {{
+          event.preventDefault();
+          const rect = svg.getBoundingClientRect();
+          const mouseX = ((event.clientX - rect.left) / rect.width) * width;
+          const oldStart = Number(layer.dataset.start || "0");
+          const oldEnd = Number(layer.dataset.end || String(width));
+          const oldSpan = oldEnd - oldStart;
+          const factor = event.deltaY < 0 ? 1.22 : 1 / 1.22;
+          const nextSpan = clamp(oldSpan / factor, minSpan, width);
+          const anchor = oldStart + (mouseX / width) * oldSpan;
+          const nextStart = anchor - (mouseX / width) * nextSpan;
+          applyWindow(svg, nextStart, nextStart + nextSpan);
+        }}, {{ passive: false }});
+
+        let dragging = false;
+        let lastX = 0;
+        svg.addEventListener("pointerdown", (event) => {{
+          dragging = true;
+          lastX = event.clientX;
+          svg.classList.add("dragging");
+          svg.setPointerCapture(event.pointerId);
+        }});
+        svg.addEventListener("pointermove", (event) => {{
+          if (!dragging) return;
+          const rect = svg.getBoundingClientRect();
+          const dx = ((event.clientX - lastX) / rect.width);
+          lastX = event.clientX;
+          const start = Number(layer.dataset.start || "0");
+          const end = Number(layer.dataset.end || String(width));
+          const span = end - start;
+          const dataDx = dx * span;
+          applyWindow(svg, start - dataDx, end - dataDx);
+        }});
+        const stopDrag = (event) => {{
+          dragging = false;
+          svg.classList.remove("dragging");
+          try {{ svg.releasePointerCapture(event.pointerId); }} catch (_) {{}}
+        }};
+        svg.addEventListener("pointerup", stopDrag);
+        svg.addEventListener("pointercancel", stopDrag);
+        svg.addEventListener("pointerleave", () => {{
+          dragging = false;
+          svg.classList.remove("dragging");
+        }});
+      }});
+
+      selector.addEventListener("change", (event) => activate(event.target.value));
+      reset?.addEventListener("click", () => {{
+        const active = document.querySelector(".kline-panel.active");
+        resetZoom(active);
+      }});
+      activate(selector.value);
+    }})();
+  </script>
 </body>
 </html>
 """

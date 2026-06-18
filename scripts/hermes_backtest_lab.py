@@ -16,10 +16,11 @@ import requests
 
 
 OKX_PUBLIC = "https://www.okx.com"
+BITGET_PUBLIC = "https://api.bitget.com"
 GECKOTERMINAL_PUBLIC = "https://api.geckoterminal.com/api/v2"
-VERSION = "hermes-backtest-lab-v2.1.0"
-TOOL_NAME_CN = "石头量化回测实验室 v2.1"
-TOOL_NAME_EN = "Hermes Backtest Lab v2.1"
+VERSION = "hermes-backtest-lab-v2.2.0"
+TOOL_NAME_CN = "石头量化回测实验室 v2.2"
+TOOL_NAME_EN = "Hermes Backtest Lab v2.2"
 
 DEFAULT_SWAP_SYMBOLS = "BTC,ETH,SOL,XRP,DOGE,SUI,BNB,TON,TRX,LINK,AVAX,NEAR,AAVE,UNI,LTC,APT,ARB,OP,DOT,ICP"
 MEME_SWAP_SYMBOLS = "PEPE,DOGE,TRUMP,MERL,SUI,TON,ARB,OP,NEAR"
@@ -57,6 +58,12 @@ EXAMPLE_TEXT = f"""
 
 10) On-chain custom token or pool
    python scripts/hermes_backtest_lab.py --data-source geckoterminal --symbols base:token:0x4200000000000000000000000000000000000006,base:pool:0xPOOL_ADDRESS --days 30 --bar 1H
+
+11) Bitget USDT perpetual replay
+   python scripts/hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL --inst-type SWAP --days 90 --bar 1H
+
+12) Bitget spot-only replay
+   python scripts/hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL --inst-type SPOT --allow-short 0 --max-leverage 1 --base-leverage 1 --days 90 --bar 1H
 
 Outputs:
    report.md     human-readable report
@@ -298,6 +305,23 @@ def okx_get(path: str, params: dict[str, Any], retries: int = 3) -> dict[str, An
     raise RuntimeError(f"request failed {path} {params}: {last_error}")
 
 
+def bitget_get(path: str, params: dict[str, Any], retries: int = 3) -> dict[str, Any]:
+    url = f"{BITGET_PUBLIC}{path}"
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        try:
+            response = HTTP.get(url, params=params, timeout=25)
+            response.raise_for_status()
+            payload = response.json()
+            if str(payload.get("code", "00000")) != "00000":
+                raise RuntimeError(f"Bitget error {payload.get('code')}: {payload.get('msg')}")
+            return payload
+        except Exception as exc:
+            last_error = exc
+            time.sleep(0.4 + attempt * 0.7)
+    raise RuntimeError(f"request failed {path} {params}: {last_error}")
+
+
 def public_get_json(base_url: str, path: str, params: dict[str, Any] | None = None, retries: int = 3) -> dict[str, Any]:
     url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
     last_error: Exception | None = None
@@ -321,6 +345,22 @@ def normalize_inst_id(symbol: str, inst_type: str, quote: str) -> str:
     if inst_type.upper() == "SPOT":
         return f"{raw}-{quote.upper()}"
     return f"{raw}-{quote.upper()}-SWAP"
+
+
+def normalize_bitget_symbol(symbol: str, quote: str) -> str:
+    raw = str(symbol or "").strip().upper()
+    if not raw:
+        raise ValueError("empty symbol")
+    if "-" in raw:
+        raw = raw.replace("-", "")
+    if "_" in raw:
+        raw = raw.replace("_", "")
+    quote = quote.upper()
+    if raw.endswith(quote):
+        return raw
+    if raw.endswith(f"{quote}SWAP"):
+        return raw.replace("SWAP", "")
+    return f"{raw}{quote}"
 
 
 def safe_cache_key(value: str) -> str:
@@ -620,6 +660,120 @@ def parse_okx_candle(row: list[Any]) -> Bar:
         close=safe_float(row[4]),
         volume=safe_float(row[5] if len(row) > 5 else 0.0),
     )
+
+
+def bitget_bar(bar: str, inst_type: str) -> str:
+    raw = str(bar or "").strip()
+    inst = inst_type.upper()
+    if inst == "SPOT":
+        table = {
+            "1m": "1min",
+            "3m": "3min",
+            "5m": "5min",
+            "15m": "15min",
+            "30m": "30min",
+            "1H": "1h",
+            "2H": "2h",
+            "4H": "4h",
+            "6H": "6h",
+            "12H": "12h",
+            "1D": "1day",
+            "1Dutc": "1day",
+        }
+    else:
+        table = {
+            "1m": "1m",
+            "3m": "3m",
+            "5m": "5m",
+            "15m": "15m",
+            "30m": "30m",
+            "1H": "1H",
+            "2H": "2H",
+            "4H": "4H",
+            "6H": "6H",
+            "12H": "12H",
+            "1D": "1D",
+            "1Dutc": "1Dutc",
+        }
+    if raw not in table:
+        raise ValueError(f"unsupported Bitget bar: {bar}")
+    return table[raw]
+
+
+def parse_bitget_candle(row: list[Any]) -> Bar:
+    return Bar(
+        ts=int(safe_float(row[0])),
+        open=safe_float(row[1]),
+        high=safe_float(row[2]),
+        low=safe_float(row[3]),
+        close=safe_float(row[4]),
+        volume=safe_float(row[5] if len(row) > 5 else 0.0),
+    )
+
+
+def fetch_bitget_candles(
+    symbol: str,
+    inst_type: str,
+    bar: str,
+    days: int,
+    cache_dir: Path,
+    refresh: bool = False,
+    *,
+    quote: str,
+    product_type: str,
+    start_ms: int | None = None,
+    end_ms: int | None = None,
+    window_label: str | None = None,
+) -> tuple[str, list[Bar]]:
+    inst_id = normalize_bitget_symbol(symbol, quote)
+    resolved_end = int(end_ms or int(time.time() * 1000))
+    resolved_start = int(start_ms if start_ms is not None else resolved_end - int(days * 86_400_000))
+    label = safe_cache_key(window_label or f"{days}d")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"BITGET_{inst_id}_{safe_cache_key(inst_type)}_{safe_cache_key(bar)}_{label}.json"
+    if cache_path.exists() and not refresh:
+        rows = json.loads(cache_path.read_text(encoding="utf-8"))
+        return f"BITGET:{inst_id}", [Bar(**row) for row in rows]
+
+    bars: list[Bar] = []
+    seen: set[int] = set()
+    granularity = bitget_bar(bar, inst_type)
+    step_ms = bar_to_ms(bar)
+    limit = 200 if inst_type.upper() == "SPOT" else 100
+    cursor_start = resolved_start
+    path = "/api/v2/spot/market/candles" if inst_type.upper() == "SPOT" else "/api/v2/mix/market/history-candles"
+
+    while cursor_start <= resolved_end:
+        cursor_end = min(resolved_end, cursor_start + step_ms * limit)
+        params: dict[str, Any] = {
+            "symbol": inst_id,
+            "granularity": granularity,
+            "startTime": str(cursor_start),
+            "endTime": str(cursor_end),
+            "limit": str(limit),
+        }
+        if inst_type.upper() != "SPOT":
+            params["productType"] = product_type
+        payload = bitget_get(path, params)
+        data = payload.get("data") or []
+        parsed = [parse_bitget_candle(row) for row in data if len(row) >= 5]
+        for candle in parsed:
+            if candle.ts in seen:
+                continue
+            if resolved_start <= candle.ts <= resolved_end:
+                bars.append(candle)
+                seen.add(candle.ts)
+        next_start = cursor_end + step_ms
+        if not parsed and cursor_end >= resolved_end:
+            break
+        cursor_start = next_start
+        if len(bars) > int((resolved_end - resolved_start) / step_ms) + 500:
+            break
+        time.sleep(0.12)
+
+    bars = sorted(bars, key=lambda row: row.ts)
+    cache_path.write_text(json.dumps([asdict(row) for row in bars], ensure_ascii=False), encoding="utf-8")
+    return f"BITGET:{inst_id}", bars
 
 
 def fetch_candles(
@@ -1767,11 +1921,12 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print resolved config and exit without downloading candles.")
     parser.add_argument("--examples", "-E", action="store_true", help="Print copy-paste command examples and exit.")
     parser.add_argument("--preset", choices=sorted(PRESET_ARGS), default="", help="Load a beginner-friendly parameter preset. Explicit CLI flags override preset values.")
-    parser.add_argument("--data-source", default="okx", choices=["okx", "geckoterminal"], help="Market data source: okx for CEX candles, geckoterminal for on-chain DEX pool candles.")
-    parser.add_argument("--symbols", default="", help="Comma-separated symbols. OKX: BTC,ETH or BTC-USDT-SWAP. On-chain: base:token:0xTOKEN or base:pool:0xPOOL.")
+    parser.add_argument("--data-source", default="okx", choices=["okx", "bitget", "geckoterminal"], help="Market data source: okx/bitget for CEX candles, geckoterminal for on-chain DEX pool candles.")
+    parser.add_argument("--symbols", default="", help="Comma-separated symbols. OKX: BTC,ETH or BTC-USDT-SWAP. Bitget: BTC,ETH or BTCUSDT. On-chain: base:token:0xTOKEN or base:pool:0xPOOL.")
     parser.add_argument("--symbols-file", default="", help="Optional UTF-8 text file with one symbol per line. Lines starting with # are ignored.")
     parser.add_argument("--inst-type", default="SWAP", choices=["SWAP", "SPOT"], help="Instrument type for bare symbols.")
     parser.add_argument("--quote", default="USDT")
+    parser.add_argument("--bitget-product-type", default="USDT-FUTURES", help="Bitget futures productType, e.g. USDT-FUTURES, COIN-FUTURES, USDC-FUTURES.")
     parser.add_argument("--onchain-network", default="base", help="Default GeckoTerminal network id for bare on-chain addresses, e.g. eth, bsc, base, solana.")
     parser.add_argument("--onchain-id-type", default="token", choices=["token", "pool"], help="Default interpretation for bare on-chain addresses.")
     parser.add_argument("--gecko-currency", default="usd", help="GeckoTerminal OHLCV currency, usually usd.")
@@ -1919,12 +2074,31 @@ def main(argv: Iterable[str] | None = None) -> int:
                         end_ms=end_ms,
                         window_label=window_label,
                     )
+                elif args.data_source == "bitget":
+                    inst_id, candles = fetch_bitget_candles(
+                        symbol,
+                        args.inst_type,
+                        args.bar,
+                        args.days,
+                        cache_dir,
+                        refresh=args.refresh,
+                        quote=args.quote,
+                        product_type=args.bitget_product_type,
+                        start_ms=start_ms,
+                        end_ms=end_ms,
+                        window_label=window_label,
+                    )
                 else:
                     inst_id = normalize_inst_id(symbol, args.inst_type, args.quote)
                     candles = fetch_candles(inst_id, args.bar, args.days, cache_dir, refresh=args.refresh, start_ms=start_ms, end_ms=end_ms, window_label=window_label)
                 bars_by_inst[inst_id] = candles
             except Exception as exc:
-                inst_id = symbol if args.data_source == "geckoterminal" else normalize_inst_id(symbol, args.inst_type, args.quote)
+                if args.data_source == "geckoterminal":
+                    inst_id = symbol
+                elif args.data_source == "bitget":
+                    inst_id = f"BITGET:{normalize_bitget_symbol(symbol, args.quote)}"
+                else:
+                    inst_id = normalize_inst_id(symbol, args.inst_type, args.quote)
                 results.append({"inst_id": inst_id, "error": str(exc), "trades": [], "start": 0.0, "end": 0.0, "max_dd": 0.0})
         if bars_by_inst:
             results.append(backtest_portfolio(bars_by_inst, args, args.starting_balance))
@@ -1948,12 +2122,31 @@ def main(argv: Iterable[str] | None = None) -> int:
                         end_ms=end_ms,
                         window_label=window_label,
                     )
+                elif args.data_source == "bitget":
+                    inst_id, candles = fetch_bitget_candles(
+                        symbol,
+                        args.inst_type,
+                        args.bar,
+                        args.days,
+                        cache_dir,
+                        refresh=args.refresh,
+                        quote=args.quote,
+                        product_type=args.bitget_product_type,
+                        start_ms=start_ms,
+                        end_ms=end_ms,
+                        window_label=window_label,
+                    )
                 else:
                     inst_id = normalize_inst_id(symbol, args.inst_type, args.quote)
                     candles = fetch_candles(inst_id, args.bar, args.days, cache_dir, refresh=args.refresh, start_ms=start_ms, end_ms=end_ms, window_label=window_label)
                 result = backtest_symbol(inst_id, candles, args, per_symbol_balance)
             except Exception as exc:
-                inst_id = symbol if args.data_source == "geckoterminal" else normalize_inst_id(symbol, args.inst_type, args.quote)
+                if args.data_source == "geckoterminal":
+                    inst_id = symbol
+                elif args.data_source == "bitget":
+                    inst_id = f"BITGET:{normalize_bitget_symbol(symbol, args.quote)}"
+                else:
+                    inst_id = normalize_inst_id(symbol, args.inst_type, args.quote)
                 result = {"inst_id": inst_id, "error": str(exc), "trades": [], "start": per_symbol_balance, "end": per_symbol_balance, "max_dd": 0.0}
             results.append(result)
 

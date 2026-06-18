@@ -1,16 +1,30 @@
-# 石头量化回测实验室 v2.1
+# 石头量化回测实验室 v2.2
 
-英文名：Hermes Backtest Lab v2.1。
+英文名：Hermes Backtest Lab v2.2。
 
 一个不需要 API Key 的本地加密货币回测工具。
 
-它使用 OKX 公开 K 线数据和 GeckoTerminal 公开 DEX 数据，支持现货、USDT 永续合约、多链链上 token、多币种组合账户回测、手续费/滑点建模、动态杠杆、动态保证金、止盈止损、时间退出、因子归因和报告导出。
+## v2.2 黑客松重点更新：Bitget 数据源正式接入
+
+这版专门强化了交易 Agent / 黑客松展示能力：
+
+- 支持 Bitget 公开行情数据回测，无需 API Key
+- 支持 Bitget USDT 永续合约，适合多空双向策略验证
+- 支持 Bitget 现货，只做多策略也能单独跑
+- 支持多币种组合账户回测，可以一次跑 BTC、ETH、SOL、SUI 等组合
+- 可视化报告支持 Bitget 标的下拉切换、全周期K线、入场/出场标记、K线缩放拖动
+- 交易标记已按对应K线中心定位，缩放时标记不变形，适合截图和路演展示
+
+一句话：现在它不只是 OKX/链上回测工具，也可以作为 Bitget Agent Hub / GetAgent 策略验证前的本地回测实验室。
+
+它使用 OKX、Bitget 公开 K 线数据和 GeckoTerminal 公开 DEX 数据，支持现货、USDT 永续合约、多链链上 token、多币种组合账户回测、手续费/滑点建模、动态杠杆、动态保证金、止盈止损、时间退出、因子归因和报告导出。
 
 > 这不是投资建议。历史回测不代表未来收益。请先用小样本和模拟盘验证。
 
 ## 功能
 
 - 任意 OKX 现货或 USDT 永续合约符号回测
+- 任意 Bitget 现货或 USDT 永续合约符号回测
 - 任意 GeckoTerminal 支持的链上 token 或 DEX pool 回测
 - 单币种回测或多币种组合账户回测
 - 支持多空双向、只做多、只做空
@@ -18,6 +32,7 @@
 - 内置 ATR、ADX、RSI、EMA、布林带、成交量 z-score 等指标
 - 支持手续费、滑点、最大持仓、账户回撤熔断
 - 输出 `report.md`、`metrics.json`、`trades.csv`
+- 输出漂亮的 `visual_report.html`，支持全周期K线、交易标记、缩放拖动和代币切换
 - 不读取 `.env`、交易所账户、私钥、API Key 或 Telegram Token
 
 ## 安装
@@ -276,3 +291,25 @@ python scripts/render_visual_report.py --run-dir outputs/hermes_backtest_lab/<ru
 ```powershell
 python scripts/render_visual_report.py --run-dir outputs/hermes_backtest_lab/<run_id> --no-open
 ```
+## Bitget 数据源
+
+v2.2 起支持 Bitget 公开行情数据回测，不需要 API Key。
+
+Bitget USDT 永续合约：
+
+```powershell
+python scripts/hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL --inst-type SWAP --days 90 --bar 1H
+```
+
+Bitget 现货，只做多：
+
+```powershell
+python scripts/hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL --inst-type SPOT --allow-short 0 --base-leverage 1 --max-leverage 1 --days 90 --bar 1H
+```
+
+说明：
+
+- 裸币种 `BTC,ETH,SOL` 会自动转成 Bitget 的 `BTCUSDT,ETHUSDT,SOLUSDT`。
+- 合约默认使用 `--bitget-product-type USDT-FUTURES`。
+- 可用 `--bitget-product-type COIN-FUTURES` 或 `USDC-FUTURES` 切换其他合约产品线。
+- 输出仍然是 `report.md`、`metrics.json`、`trades.csv`，也兼容 HTML 可视化报告。

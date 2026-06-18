@@ -1,19 +1,19 @@
 ---
 name: hermes-backtest-lab
-description: Build and run an open-source local crypto backtest lab for OKX public market data and GeckoTerminal on-chain DEX candles. Use when the user wants to backtest arbitrary OKX spot/perpetual symbols, replay chain token or pool prices, analyze 90/180 day performance, compare factors, or generate a shareable non-secret report without using GetAgent or private exchange credentials.
+description: Build and run an open-source local crypto backtest lab for OKX and Bitget public market data plus GeckoTerminal on-chain DEX candles. Use when the user wants to backtest arbitrary OKX/Bitget spot or perpetual symbols, replay chain token or pool prices, analyze 90/180 day performance, compare factors, or generate a shareable non-secret report without using GetAgent or private exchange credentials.
 ---
 
-# 石头量化回测实验室 v2.1
+# 石头量化回测实验室 v2.2
 
-English name: Hermes Backtest Lab v2.1.
+English name: Hermes Backtest Lab v2.2.
 
 Use this skill to run a local, shareable crypto backtest that does not require API keys.
 
-Current script version: `hermes-backtest-lab-v2.1.0`.
+Current script version: `hermes-backtest-lab-v2.2.0`.
 
 ## Safety
 
-- Uses OKX public market endpoints only.
+- Uses OKX, Bitget, and GeckoTerminal public market endpoints only.
 - Does not read `.env`, account files, API keys, Telegram tokens, or live positions.
 - Writes only local reports, trade CSVs, and metrics JSON under the chosen output directory.
 - Designed for research. Do not treat historical backtest performance as a live trading guarantee.
@@ -67,6 +67,12 @@ python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL,SUI,LINK --inst-ty
 # Backtest OKX spot symbols.
 python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SUI --inst-type SPOT --days 180 --bar 1H --allow-short false
 
+# Backtest Bitget USDT perpetual symbols.
+python .\scripts\hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL --inst-type SWAP --days 90 --bar 1H
+
+# Backtest Bitget spot symbols.
+python .\scripts\hermes_backtest_lab.py --data-source bitget --symbols BTC,ETH,SOL --inst-type SPOT --allow-short false --base-leverage 1 --max-leverage 1 --days 90 --bar 1H
+
 # Use full OKX instIds directly.
 python .\scripts\hermes_backtest_lab.py --symbols BTC-USDT-SWAP,ETH-USDT-SWAP --days 90 --bar 4H
 
@@ -83,8 +89,8 @@ python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL,SUI,LINK --inst-ty
 
 ## Workflow
 
-1. Resolve symbols into OKX `instId` or GeckoTerminal chain token/pool identifiers.
-2. Fetch candles from OKX public historical endpoints or GeckoTerminal public DEX OHLCV endpoints.
+1. Resolve symbols into OKX `instId`, Bitget symbols, or GeckoTerminal chain token/pool identifiers.
+2. Fetch candles from OKX/Bitget public historical endpoints or GeckoTerminal public DEX OHLCV endpoints.
 3. Build replay-safe indicators: EMA, RSI, ATR, Bollinger Bands, ADX, volume z-score, relative trend state.
 4. Score long and short setups using Hermes-style trend and range logic.
 5. Apply the optional oracle-180d profile layer: ATR/ADX bands, pullback-long and rebound-short style tags, late-extension rejection, leverage caps, margin scaling, fast adverse exits, large-margin ATR gates, volume-heat filters, and per-trade trend hold windows.
@@ -94,6 +100,7 @@ python .\scripts\hermes_backtest_lab.py --symbols BTC,ETH,SOL,SUI,LINK --inst-ty
    - `trades.csv`
    - `metrics.json`
    - cached candle JSON under `cache/`
+   - optional `visual_report.html` with full-period K-lines, token selector, zoom/pan, and entry/exit markers
 
 ## Public Presets
 
