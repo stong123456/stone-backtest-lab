@@ -19,7 +19,7 @@
     body {
       margin: 0;
       min-height: 100vh;
-      font-family: "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      font-family: "Microsoft YaHei", "Noto Sans SC", "Segoe UI", sans-serif;
       background:
         radial-gradient(circle at 20% 10%, rgba(64, 215, 129, .18), transparent 28rem),
         radial-gradient(circle at 80% 20%, rgba(240, 196, 92, .14), transparent 24rem),
@@ -48,6 +48,9 @@
     a {
       color: var(--text);
       text-decoration: none;
+    }
+    .home {
+      color: var(--gold);
     }
     .report {
       display: block;
@@ -81,12 +84,12 @@
 </head>
 <body>
   <main>
-    <h1>石头量化回测实验室报告</h1>
-    <p>这里收录可分享的回测可视化页面，打开后可以查看收益曲线、回撤、K线与交易标记、逐笔交易明细。<a href="../" style="color:#f0c45c;">返回 Stone Signal OS 首页</a></p>
+    <h1>回测报告</h1>
+    <p>这里收录可分享的回测可视化页面，打开后可以查看收益曲线、回撤、K 线与交易标记、逐笔交易明细。<a class="home" href="../">返回回测实验室首页</a></p>
     <a class="report" href="./bitget_90d_hermes_auto_20260618.html">
-      <span class="tag">Bitget v2.2</span>
-      <h2>Bitget 90天 Hermes Auto 回测报告</h2>
-      <div class="meta">数据源：Bitget 公开行情 · 周期：90天 · 报告生成日：2026-06-18</div>
+      <span class="tag">BITGET · 90D · HERMES AUTO</span>
+      <h2>Hermes 自动交易策略 Bitget 90 天回测</h2>
+      <div class="meta">包含交互式 K 线、交易标记、完整交易明细、收益曲线和回撤分析。</div>
     </a>
   </main>
 </body>
